@@ -1,0 +1,24 @@
+services:
+  cookie:
+    build: .
+    # image: ghcr.io/ldideric/cookie-idler:latest
+    init: true                    # reaps the Chromium child
+    ports:
+      - "3000:3000"
+    environment:
+      TZ: ${TZ:-UTC}
+      COOKIE_STEAM_VERSION: "${COOKIE_STEAM_VERSION:-}"
+      COOKIE_NTFY_URL: "${COOKIE_NTFY_URL:-}"
+    volumes:
+      - ./mods:/mods-seed:ro
+      - cookie_game:/game
+      - cookie_mods:/mods
+      - cookie_profile:/profile
+      - cookie_saves:/saves
+    restart: unless-stopped
+
+volumes:
+  cookie_game:
+  cookie_mods:
+  cookie_profile:
+  cookie_saves:

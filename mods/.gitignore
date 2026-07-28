@@ -1,0 +1,5 @@
+# Mods are user-provided and often third-party; nothing here is committed except
+# this file and the README. Drop your mod folders in and they stay local.
+*
+!.gitignore
+!README.md

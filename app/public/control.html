@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cookie Idler</title>
+<!-- A data: URI has no CSS context, so these colours are literal. Keep them in
+     step with the same mark in the header. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg%3E%3Ccircle cx='16' cy='16' r='13.6' fill='none' stroke='%239c6f1f' stroke-width='2.6' stroke-linecap='round' stroke-dasharray='70.5 15'/%3E%3Ccircle cx='27.6' cy='9' r='2.4' fill='%23f7d382'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='9' fill='%23e6b143'/%3E%3Cg fill='%234a2c0c'%3E%3Ccircle cx='13' cy='13' r='1.9'/%3E%3Ccircle cx='19' cy='15' r='1.6'/%3E%3Ccircle cx='15' cy='19.5' r='1.7'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:        #140f09;
+    --panel:     #241a0e;
+    --panel-2:   #2d2113;
+    --ink:       #140d06;
+    --line:      #4a3720;
+    --line-2:    #5f4826;
+    --text:      #f1e6cf;
+    --text-dim:  #c3ab82;
+    --text-mute: #8f7a54;
+    --gold:      #e6b143;
+    --gold-hi:   #f7d382;
+    --gold-lo:   #9c6f1f;
+    --chip:      #4a2c0c;
+    --green:     #9bd36a;
+    --red:       #e69068;
+    --serif:     Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans:      system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --maxw:      1120px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--text); font-family: var(--sans);
+    background:
+      radial-gradient(1100px 520px at 50% -8%, #2a1e10 0%, transparent 62%),
+      repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 2px, transparent 2px 4px),
+      var(--bg);
+    background-attachment: fixed;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 30;
+    background: linear-gradient(180deg, #241a0d, #1a120a);
+    border-bottom: 2px solid var(--line);
+    box-shadow: 0 3px 0 #100b05, 0 6px 16px rgba(0,0,0,.4);
+  }
+  .bar {
+    max-width: var(--maxw); margin: 0 auto; padding: 12px 32px;
+    display: flex; align-items: center; gap: 22px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--serif); font-size: 21px; font-weight: 700;
+    color: var(--gold-hi); text-shadow: 0 1px 0 #000, 0 0 12px rgba(230,177,67,.25);
+    letter-spacing: .3px; white-space: nowrap;
+  }
+  .brand .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--text-mute); box-shadow: inset 0 0 0 1px rgba(0,0,0,.5);
+  }
+  .brand .dot.live { background: var(--green); box-shadow: 0 0 8px rgba(155,211,106,.8), inset 0 0 0 1px rgba(0,0,0,.4); }
+  .brand .mark { width: 25px; height: 25px; flex: none; display: block; }
+  /* About the viewBox centre, not the group's own bounding box, which is
+     off-centre and would make the ring wobble. */
+  .brand .mark .ring { transform-box: view-box; transform-origin: 16px 16px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .brand .dot.live ~ .mark .ring { animation: orbit 3.4s linear infinite; }
+  }
+  @keyframes orbit { to { transform: rotate(360deg); } }
+
+  .hstats { display: flex; align-items: baseline; gap: 20px; margin-left: 26px; }
+  .hstat { display: flex; align-items: baseline; gap: 7px; }
+  .hstat.sep { padding-left: 20px; border-left: 2px solid var(--line); }
+  .hlabel { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--gold-lo); font-weight: 700; }
+  .hstat b { font-family: var(--serif); font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; }
+  .hstat b.gold { color: var(--gold-hi); }
+  @media (max-width: 900px) { .hstats { display: none; } }
+
+  nav.tabs { display: flex; gap: 8px; margin-left: auto; }
+  nav.tabs button {
+    font-family: var(--serif); font-size: 15px; font-weight: 700; cursor: pointer;
+    color: var(--text-dim); padding: 7px 18px; border-radius: 7px;
+    background: linear-gradient(180deg, #33260f, #221809);
+    border: 2px solid var(--line);
+    box-shadow: inset 0 1px 0 rgba(255,220,150,.10), 0 2px 0 #100b05;
+    text-shadow: 0 1px 1px rgba(0,0,0,.6);
+    transition: filter .12s, transform .04s;
+  }
+  nav.tabs button:hover { filter: brightness(1.18); color: var(--text); }
+  nav.tabs button:active { transform: translateY(2px); box-shadow: inset 0 1px 3px rgba(0,0,0,.5); }
+  nav.tabs button.active {
+    color: #2a1c04;
+    background: linear-gradient(180deg, var(--gold-hi), var(--gold));
+    border-color: var(--gold-hi);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 2px 0 var(--gold-lo);
+    text-shadow: 0 1px 0 rgba(255,245,210,.5);
+  }
+
+  main { max-width: var(--maxw); margin: 0 auto; padding: 26px 32px 52px; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+
+  .bleed { position: relative; left: 50%; transform: translateX(-50%); width: min(1720px, 96vw); }
+  .stage {
+    position: relative; margin: 0 auto; overflow: hidden;
+    aspect-ratio: 16 / 9; max-height: calc(100vh - 130px);
+    background: #0a0805; border-radius: 12px;
+    border: 3px solid var(--line-2);
+    box-shadow: inset 0 0 0 2px #0a0805, inset 0 0 30px rgba(0,0,0,.6),
+                0 4px 0 #0d0904, 0 10px 30px rgba(0,0,0,.5);
+  }
+  #screen { display: block; width: 100%; height: 100%; object-fit: contain; cursor: pointer; user-select: none; -webkit-user-drag: none; }
+  .stage .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 14px;
+    align-items: center; justify-content: center; background: #0a0805;
+    color: var(--text-mute); font-family: var(--serif); font-size: 15px;
+  }
+  .spinner { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--line-2); border-top-color: var(--gold); animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hint { max-width: var(--maxw); margin: 14px auto 0; color: var(--text-mute); font-size: 13px; text-align: center; }
+  .hint b { color: var(--text-dim); font-weight: 600; }
+
+  .panel {
+    background: linear-gradient(180deg, var(--panel), #1c1409);
+    border: 2px solid var(--line); border-radius: 12px; padding: 24px 26px;
+    box-shadow: inset 0 1px 0 rgba(255,220,150,.06), 0 3px 0 #100b05, 0 8px 22px rgba(0,0,0,.4);
+  }
+  .panel + .panel { margin-top: 18px; }
+  .panel h2 { margin: 0 0 5px; font-family: var(--serif); font-size: 19px; color: var(--gold-hi); text-shadow: 0 1px 0 #000; }
+  .panel p.sub { margin: 0 0 18px; color: var(--text-dim); font-size: 13.5px; line-height: 1.55; }
+
+  .mod { display: flex; align-items: center; gap: 16px; padding: 15px 0; border-bottom: 1px dashed var(--line); }
+  .mod:last-child { border-bottom: none; }
+  .mod .order { width: 62px; flex: none; }
+  .mod .order input {
+    width: 100%; text-align: center; font-family: var(--serif); font-weight: 700; font-size: 17px;
+    background: var(--ink); border: 2px solid var(--line); color: var(--gold-hi);
+    border-radius: 6px; padding: 8px 4px; box-shadow: inset 0 2px 4px rgba(0,0,0,.5);
+    -moz-appearance: textfield; appearance: textfield;
+  }
+  .mod .order input::-webkit-outer-spin-button,
+  .mod .order input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .switch { position: relative; width: 46px; height: 26px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track {
+    position: absolute; inset: 0; cursor: pointer; border-radius: 999px;
+    background: var(--ink); border: 2px solid var(--line);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,.6); transition: background .18s, border-color .18s;
+  }
+  .switch .track::before {
+    content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 2px;
+    border-radius: 50%; background: linear-gradient(180deg, #b6a077, #8a7350);
+    box-shadow: 0 1px 2px rgba(0,0,0,.6); transition: transform .18s, background .18s;
+  }
+  .switch input:checked + .track { background: #4a3410; border-color: var(--gold-lo); }
+  .switch input:checked + .track::before { transform: translateX(20px); background: linear-gradient(180deg, var(--gold-hi), var(--gold)); }
+  .mod .info { flex: 1; min-width: 0; }
+  .mod .name { font-family: var(--serif); font-weight: 700; font-size: 15px; color: var(--text); }
+  .mod .meta { font-size: 12px; color: var(--text-mute); margin-top: 2px; }
+  .mod .err { font-size: 12px; color: var(--red); margin-top: 5px; }
+
+  .btn {
+    font-family: var(--serif); font-size: 15px; font-weight: 700; cursor: pointer;
+    display: inline-block; text-decoration: none; padding: 10px 20px; border-radius: 8px;
+    color: var(--gold-hi); background: linear-gradient(180deg, #3c2c15, #251a0c);
+    border: 2px solid var(--line-2);
+    box-shadow: inset 0 1px 0 rgba(255,220,150,.14), 0 3px 0 #0f0a04, 0 4px 6px rgba(0,0,0,.35);
+    text-shadow: 0 1px 1px rgba(0,0,0,.6); transition: filter .12s, transform .04s;
+  }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:active { transform: translateY(3px); box-shadow: inset 0 2px 5px rgba(0,0,0,.5); }
+  .btn.primary {
+    color: #2c1d04; background: linear-gradient(180deg, var(--gold-hi), var(--gold));
+    border-color: var(--gold-hi);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 3px 0 var(--gold-lo), 0 4px 7px rgba(0,0,0,.35);
+    text-shadow: 0 1px 0 rgba(255,245,210,.5);
+  }
+  .btn.small { font-size: 13px; padding: 6px 13px; }
+  .btn.danger { color: var(--red); border-color: #6b3a24; }
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 22px; flex-wrap: wrap; }
+  .actions .msg { color: var(--text-dim); font-size: 13px; font-style: italic; }
+
+  .drop {
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    padding: 30px 24px; text-align: center; border-radius: 10px;
+    border: 2px dashed var(--line-2); background: rgba(0,0,0,.18);
+    color: var(--text-mute); font-size: 13.5px; transition: border-color .15s, background .15s;
+  }
+  .drop.over { border-color: var(--gold); background: rgba(230,177,67,.09); color: var(--text-dim); }
+  .drop .big { font-family: var(--serif); font-size: 15px; color: var(--text-dim); }
+
+  textarea {
+    width: 100%; min-height: 110px; resize: vertical; color: var(--text);
+    background: var(--ink); border: 2px solid var(--line); border-radius: 8px; padding: 12px;
+    font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.5);
+  }
+  textarea:focus, .mod .order input:focus { outline: none; border-color: var(--gold-lo); }
+  .divider { height: 2px; margin: 26px 0; background: linear-gradient(90deg, transparent, var(--line-2), transparent); }
+
+  @media (max-width: 720px) {
+    .bar, main { padding-left: 16px; padding-right: 16px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .brand span.full { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+      <div class="brand">
+      <span class="dot" id="livedot"></span>
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <g class="ring">
+          <circle cx="16" cy="16" r="13.6" fill="none" stroke="var(--gold-lo)"
+            stroke-width="2.6" stroke-linecap="round" stroke-dasharray="70.5 15"/>
+          <circle cx="27.6" cy="9" r="2.4" fill="var(--gold-hi)"/>
+        </g>
+        <circle cx="16" cy="16" r="9" fill="var(--gold)"/>
+        <g fill="var(--chip)">
+          <circle cx="13" cy="13" r="1.9"/>
+          <circle cx="19" cy="15" r="1.6"/>
+          <circle cx="15" cy="19.5" r="1.7"/>
+        </g>
+      </svg>
+      <span class="full">Cookie Idler</span>
+    </div>
+    <div class="hstats">
+      <div class="hstat"><span class="hlabel">cookies</span><b class="gold" id="s-cookies">-</b></div>
+      <div class="hstat"><span class="hlabel">per sec</span><b id="s-cps">-</b></div>
+      <div class="hstat sep"><span class="hlabel">v</span><b id="s-ver">-</b></div>
+    </div>
+    <nav class="tabs">
+      <button data-tab="game" class="active">Game</button>
+      <button data-tab="mods">Mods</button>
+      <button data-tab="save">Save</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="tab active" id="tab-game">
+    <div class="bleed">
+      <div class="stage">
+        <img id="screen" alt="Cookie Clicker live view">
+        <div class="overlay" id="overlay"><div class="spinner"></div><div id="overlay-text">warming up the ovens…</div></div>
+      </div>
+    </div>
+    <p class="hint"><b>Click</b> to play · <b>scroll</b> over the store or a menu to reach buildings, settings and mods · <b>type</b> while hovering to send keys. Rendering sleeps when you leave this tab.</p>
+  </section>
+
+  <section class="tab" id="tab-mods">
+    <div class="panel">
+      <h2>Mods</h2>
+      <p class="sub">Lower order loads first; put dependencies (like CCSE) above what needs them. Newly uploaded mods start switched off.</p>
+      <div id="modrows"></div>
+      <div class="actions">
+        <button class="btn primary" id="saveMods">Save &amp; reload</button>
+        <button class="btn" id="reloadMods">Reload game</button>
+        <span class="msg" id="modsMsg"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Add a mod</h2>
+      <p class="sub">Pick or drag the mod's <b>folder</b>, the one holding its <code>main.js</code>. A folder full of mods installs every mod inside at once. Re-uploading a mod replaces it and keeps its switch and load order.</p>
+      <div class="drop" id="drop">
+        <div class="big">Drag a mod folder here</div>
+        <div>or</div>
+        <button class="btn" id="pickFolder">Choose a folder…</button>
+        <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+      </div>
+      <div class="actions">
+        <span class="msg" id="upMsg"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-save">
+    <div class="panel">
+      <h2>Export to Steam</h2>
+      <p class="sub">Grabs the live save right now. In Steam: Options, then Import save, and paste the file's contents. Achievements pop on import.</p>
+      <a class="btn primary" href="/save" download>Download save</a>
+    </div>
+    <div class="panel">
+      <h2>Import a save</h2>
+      <p class="sub">Seed the idler with existing progress: in Steam, Options, then Export save, and paste the code here. This replaces the idler's current state.</p>
+      <textarea id="importCode" placeholder="paste save code…"></textarea>
+      <div class="actions">
+        <button class="btn primary" id="doImport">Load into idler</button>
+        <span class="msg" id="importMsg"></span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+let activeTab = 'game';
+document.querySelectorAll('nav.tabs button').forEach((b) => {
+  b.onclick = () => {
+    activeTab = b.dataset.tab;
+    document.querySelectorAll('nav.tabs button').forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === 'tab-' + activeTab));
+    if (activeTab === 'game') openStream(); else closeStream();
+    if (activeTab === 'mods') loadMods();
+  };
+});
+
+// The game's own short-scale suffixes, built the way main.js:250 builds
+// formatShort, so the header names match what the game shows. Index 1 is the
+// first one reached: 'M' at 1e6, 'Dc' at 1e33, 'UnD' at 1e36.
+const SCALE = ['k','M','B','T','Qa','Qi','Sx','Sp','Oc','No'];
+for (const suffix of ['D','V','T','Qa','Qi','Sx','Sp','O','N']) {
+  for (const prefix of ['','Un','Do','Tr','Qa','Qi','Sx','Sp','Oc','No']) SCALE.push(prefix + suffix);
+}
+SCALE[10] = 'Dc';
+
+// main.js:217 formatEveryThirdPower: one divide, then per 1000, 3 decimals.
+function fmt(n) {
+  if (n == null || !isFinite(n)) return '-';
+  if (n < 1000) return (Math.round(n * 10) / 10).toLocaleString();
+  if (n < 1e6) return Math.floor(n).toLocaleString();
+  let base = 0;
+  n /= 1000;
+  while (Math.round(n) >= 1000) { n /= 1000; base++; }
+  if (base >= SCALE.length) return 'Infinity';
+  return (Math.round(n * 1000) / 1000).toLocaleString() + ' ' + SCALE[base];
+}
+async function poll() {
+  try {
+    const d = await (await fetch('/up')).json();
+    $('#s-cookies').textContent = fmt(d.cookies);
+    $('#s-cps').textContent = fmt(d.cps);
+    $('#s-ver').textContent = d.version ?? '-';
+    $('#livedot').classList.toggle('live', !!d.ok);
+  } catch { $('#livedot').classList.remove('live'); }
+}
+setInterval(poll, 2500); poll();
+
+let es = null;
+const screen = $('#screen'), overlay = $('#overlay');
+function showOverlay(t) { $('#overlay-text').textContent = t; overlay.style.display = 'flex'; }
+function openStream() {
+  if (es) return;
+  showOverlay('warming up the ovens…');
+  es = new EventSource('/frames');
+  es.onmessage = (e) => { screen.src = 'data:image/jpeg;base64,' + e.data; overlay.style.display = 'none'; };
+  es.onerror = () => showOverlay('stream interrupted, retrying…');
+  screen.addEventListener('load', () => {
+    if (screen.naturalWidth && screen.naturalHeight)
+      screen.parentElement.style.aspectRatio = screen.naturalWidth + ' / ' + screen.naturalHeight;
+  });
+}
+function closeStream() { if (es) { es.close(); es = null; } }
+
+// object-fit: contain letterboxes, hence the drawn rect rather than the element.
+function toGameCoords(ev) {
+  const gw = screen.naturalWidth, gh = screen.naturalHeight;
+  if (!gw || !gh) return null;
+  const r = screen.getBoundingClientRect();
+  const scale = Math.min(r.width / gw, r.height / gh);
+  const offX = (r.width - gw * scale) / 2, offY = (r.height - gh * scale) / 2;
+  const x = (ev.clientX - r.left - offX) / scale, y = (ev.clientY - r.top - offY) / scale;
+  if (x < 0 || y < 0 || x > gw || y > gh) return null;
+  return { x: Math.round(x), y: Math.round(y) };
+}
+screen.addEventListener('click', (ev) => { const p = toGameCoords(ev); if (p) fetch('/input/click', { method:'POST', body: JSON.stringify(p) }); });
+screen.addEventListener('wheel', (ev) => {
+  const p = toGameCoords(ev); if (!p) return; ev.preventDefault();
+  fetch('/input/scroll', { method:'POST', body: JSON.stringify({ ...p, deltaY: ev.deltaY }) });
+}, { passive: false });
+document.addEventListener('keydown', (ev) => {
+  if (activeTab !== 'game') return;
+  const tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (ev.key.length === 1 || ['Enter','Escape','Backspace'].includes(ev.key))
+    fetch('/input/key', { method:'POST', body: JSON.stringify({ key: ev.key }) });
+});
+
+let modList = [];
+async function loadMods() {
+  const { mods, errors } = await (await fetch('/api/mods')).json();
+  modList = mods;
+  const box = $('#modrows'); box.innerHTML = '';
+  if (!mods.length) { box.innerHTML = '<p class="sub" style="margin:6px 0 0">No mods yet. Add one below.</p>'; return; }
+  for (const m of mods) {
+    const errs = errors[m.id] || [];
+    const row = document.createElement('div'); row.className = 'mod';
+    row.innerHTML = `
+      <div class="order"><input type="number" value="${m.order}" data-folder="${enc(m.folder)}" class="ord"></div>
+      <label class="switch"><input type="checkbox" ${m.enabled ? 'checked' : ''} data-folder="${enc(m.folder)}" class="en"><span class="track"></span></label>
+      <div class="info">
+        <div class="name">${esc(m.name)}</div>
+        <div class="meta">${esc(m.folder)}${m.id !== m.folder ? ' · ' + esc(m.id) : ''}${m.author ? ' · ' + esc(m.author) : ''}</div>
+        ${errs.length ? `<div class="err">⚠ ${esc(errs[0])}</div>` : ''}
+      </div>
+      <button class="btn small danger rm" data-folder="${enc(m.folder)}">Remove</button>`;
+    row.querySelector('.rm').onclick = () => removeMod(m.folder, m.name);
+    box.appendChild(row);
+  }
+}
+
+async function removeMod(folder, name) {
+  if (!confirm(`Remove "${name}"? Its files are deleted from the idler.`)) return;
+  $('#modsMsg').textContent = 'removing…';
+  const r = await fetch('/api/mods/' + encodeURIComponent(folder), { method: 'DELETE' });
+  const d = await r.json().catch(() => ({}));
+  $('#modsMsg').textContent = r.ok ? 'removed ✓' : (d.error || 'remove failed');
+  await loadMods();
+  setTimeout(() => { $('#modsMsg').textContent = ''; }, 2000);
+}
+function collectMods() {
+  return modList.map((m) => ({
+    folder: m.folder,
+    enabled: document.querySelector(`.en[data-folder="${cssEsc(m.folder)}"]`).checked,
+    order: Number(document.querySelector(`.ord[data-folder="${cssEsc(m.folder)}"]`).value) || 0,
+  }));
+}
+$('#saveMods').onclick = async () => {
+  $('#modsMsg').textContent = 'saving…';
+  await fetch('/api/mods', { method:'POST', body: JSON.stringify(collectMods()) });
+  await fetch('/api/reload', { method:'POST' });
+  $('#modsMsg').textContent = 'saved & reloaded ✓';
+  setTimeout(() => { $('#modsMsg').textContent = ''; loadMods(); }, 1200);
+};
+$('#reloadMods').onclick = async () => {
+  $('#modsMsg').textContent = 'reloading…';
+  await fetch('/api/reload', { method:'POST' });
+  $('#modsMsg').textContent = 'reloaded ✓';
+  setTimeout(() => { $('#modsMsg').textContent = ''; loadMods(); }, 1200);
+};
+
+const drop = $('#drop'), upMsg = $('#upMsg');
+const upSay = (t) => { upMsg.textContent = t; };
+
+const toB64 = (file) => new Promise((ok, fail) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(',')[1] || '');
+  r.onerror = () => fail(r.error);
+  r.readAsDataURL(file);
+});
+
+// The sidecar drops these too; this only keeps the upload small.
+const isJunk = (path) => path.split('/').some((p) => p.startsWith('.'));
+
+async function sendMods(entries, name) {
+  entries = entries.filter((e) => !isJunk(e.path));
+  if (!entries.length) { upSay('nothing to upload there'); return; }
+  const bytes = entries.reduce((n, e) => n + e.file.size, 0);
+  upSay(`packing ${entries.length} file(s), ${(bytes / 1024).toFixed(0)} KB…`);
+
+  const files = {};
+  for (const e of entries) files[e.path] = await toB64(e.file);
+
+  upSay('uploading…');
+  try {
+    const r = await fetch('/api/mods/upload', {
+      method: 'POST',
+      body: JSON.stringify({ name, files }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { upSay(d.error || 'upload failed'); return; }
+    const names = (d.installed || []).map((m) => m.folder);
+    upSay(names.length
+      ? `installed ${names.join(', ')} ✓ switch it on above, then Save & reload`
+      : 'nothing was installed');
+    await loadMods();
+  } catch (e) {
+    upSay('upload failed: ' + e.message);
+  }
+}
+
+// webkitRelativePath includes the folder itself, so no name hint is needed.
+$('#pickFolder').onclick = () => $('#folderInput').click();
+$('#folderInput').onchange = async (ev) => {
+  const entries = [...ev.target.files].map((f) => ({ path: f.webkitRelativePath || f.name, file: f }));
+  ev.target.value = '';           // let the same folder be picked again later
+  await sendMods(entries, '');
+};
+
+// readEntries returns one batch at a time and must be called until empty.
+function readAll(reader) {
+  return new Promise((ok, fail) => {
+    const out = [];
+    const pump = () => reader.readEntries((batch) => {
+      if (!batch.length) { ok(out); return; }
+      out.push(...batch); pump();
+    }, fail);
+    pump();
+  });
+}
+async function walk(entry, prefix, out) {
+  if (entry.isFile) {
+    const file = await new Promise((ok, fail) => entry.file(ok, fail));
+    out.push({ path: prefix + entry.name, file });
+    return;
+  }
+  if (entry.isDirectory) {
+    for (const child of await readAll(entry.createReader())) {
+      await walk(child, prefix + entry.name + '/', out);
+    }
+  }
+}
+
+['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (ev) => {
+  ev.preventDefault(); drop.classList.add('over');
+}));
+['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (ev) => {
+  ev.preventDefault(); drop.classList.remove('over');
+}));
+drop.addEventListener('drop', async (ev) => {
+  const items = [...(ev.dataTransfer?.items || [])]
+    .map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry())
+    .filter(Boolean);
+  if (!items.length) { upSay('could not read that drop; use Choose a folder instead'); return; }
+  upSay('reading…');
+  const out = [];
+  try {
+    for (const it of items) await walk(it, '', out);
+  } catch (e) { upSay('could not read that folder: ' + e.message); return; }
+  await sendMods(out, '');
+});
+
+$('#doImport').onclick = async () => {
+  const code = $('#importCode').value.trim(), msg = $('#importMsg');
+  if (!code) { msg.textContent = 'paste a save code first'; return; }
+  msg.textContent = 'importing…';
+  try {
+    const d = await (await fetch('/save/import', { method:'POST', body: code })).json();
+    msg.textContent = d.ok ? 'imported and saved ✓' : 'the game rejected that code';
+    if (d.ok) { $('#importCode').value = ''; poll(); }
+  } catch { msg.textContent = 'import failed'; }
+};
+
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function enc(s) { return String(s).replace(/"/g, '&quot;'); }
+function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); }
+
+openStream();
+</script>
+</body>
+</html>

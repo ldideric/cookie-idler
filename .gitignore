@@ -1,0 +1,18 @@
+# Runtime state, never committed. Keep patterns on their own lines: a trailing
+# "# comment" after a pattern is treated as part of the pattern, so the ignore
+# silently matches nothing.
+
+# The mirrored web build (regenerable, and not ours to re-host).
+game/
+# Chromium persistent profile (the game's autosave lives here). Large.
+profile/
+# Timestamped save exports.
+saves/
+.env
+
+# Local editor / OS noise.
+.DS_Store
+*.log
+
+# Local dev compose override.
+compose.override.yml

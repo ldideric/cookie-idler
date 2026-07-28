@@ -1,0 +1,12 @@
+# Only the sidecar source belongs in the image. Everything else is runtime state
+# or repo scaffolding.
+game/
+mods/
+profile/
+saves/
+.env
+.git/
+.github/
+*.md
+compose*.yml
+LICENSE
