@@ -115,6 +115,7 @@ All optional.
 | `BACKUP_KEEP_DAYS` | `14` | Backup retention. |
 | `WATCHDOG_EVERY_MS` | `60000` | Loop-health check interval. |
 | `STALL_STRIKES` | `3` | Consecutive stalled checks before the watchdog reloads. |
+| `CDP_TIMEOUT_MS` | `30000` | Deadline on a single DevTools call. |
 | `COOKIE_MEMORY_LIMIT` | - | If you cap memory, give it 1G. Chromium settles around 590M, and squeezing it is not a clean failure: the browser drops save writes silently. |
 
 Volumes: `/game` (mirror), `/mods` (live mod set), `/profile` (Chromium profile,
@@ -144,7 +145,9 @@ half an hour rather than the run.
   when a write fails.
 - A watchdog checks the logic loop every minute. Sleep mode is resumed in place;
   a genuine stall takes three consecutive checks before a reload, since a busy
-  page can crawl for a minute on its own.
+  page can crawl for a minute on its own. Checks never overlap, and every
+  DevTools call has a deadline, so a browser that dies without closing its socket
+  fails the check instead of parking it forever.
 - Anything that looks like real trouble pings ntfy, if it is configured.
 
 ## Behind a reverse proxy

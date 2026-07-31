@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readdirSync, unlinkSync } from 'node:fs';
 
 const MS_PLAYWRIGHT = '/ms-playwright';
+const SEND_TIMEOUT_MS = Number(process.env.CDP_TIMEOUT_MS ?? 30_000);
 
 export function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
@@ -126,13 +127,29 @@ export class CDP {
     return () => this.#handlers.get(method)?.delete(handler);
   }
 
-  send(method, params = {}, sessionId) {
+  // A browser killed outright can leave the socket open with the request never
+  // answered, and the close event that would reject it never arrives. Without a
+  // deadline the caller waits forever: the watchdog stops striking and /up stops
+  // answering, both silently.
+  send(method, params = {}, sessionId, { timeoutMs = SEND_TIMEOUT_MS } = {}) {
     const id = this.#nextId++;
     const payload = { id, method, params };
     if (sessionId) payload.sessionId = sessionId;
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
-      this.#ws.send(JSON.stringify(payload));
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new Error(`${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      timer.unref();
+      const settle = (fn) => (arg) => { clearTimeout(timer); fn(arg); };
+      this.#pending.set(id, { resolve: settle(resolve), reject: settle(reject) });
+      try {
+        this.#ws.send(JSON.stringify(payload));
+      } catch (e) {
+        this.#pending.delete(id);
+        clearTimeout(timer);
+        reject(e);
+      }
     });
   }
 

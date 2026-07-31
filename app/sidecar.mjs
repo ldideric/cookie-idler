@@ -502,6 +502,7 @@ async function pruneBackups() {
 const STALL_STRIKES = Number(process.env.STALL_STRIKES ?? 3);
 let lastLoopT = -1;
 let strikes = 0;
+let watchdogBusy = false;
 
 function resetWatchdogBaseline() { lastLoopT = -1; strikes = 0; }
 
@@ -780,7 +781,15 @@ control.listen(CONTROL_PORT, '0.0.0.0', () =>
 
 // First backup shortly after boot, so a save exists early.
 const backupTimer = setInterval(() => backupSave('periodic'), BACKUP_EVERY_MS);
-const watchdogTimer = setInterval(watchdog, WATCHDOG_EVERY_MS);
+// setInterval does not wait for an async callback, and a reload outlasts the
+// interval, so unguarded passes pile up and race each other's browser restart.
+const watchdogTimer = setInterval(() => {
+  if (watchdogBusy) return;
+  watchdogBusy = true;
+  watchdog()
+    .catch((e) => console.error('[sidecar] watchdog failed:', e.message))
+    .finally(() => { watchdogBusy = false; });
+}, WATCHDOG_EVERY_MS);
 setTimeout(() => backupSave('startup'), 15_000);
 
 let shuttingDown = false;
