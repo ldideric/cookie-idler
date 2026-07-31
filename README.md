@@ -108,7 +108,9 @@ All optional.
 | Variable | Default | Purpose |
 |---|---|---|
 | `COOKIE_STEAM_VERSION` | (unset) | Your Steam build's version, if it differs from the web mirror. Enables a version-patched export. |
-| `COOKIE_NTFY_URL` | (unset) | [ntfy](https://ntfy.sh) topic URL for watchdog alerts. |
+| `COOKIE_NTFY_URL` | (unset) | [ntfy](https://ntfy.sh) topic URL for alerts, for example `https://ntfy.sh/my-cookie-idler`. Unset means no alerts. |
+| `COOKIE_NTFY_TOKEN` | (unset) | ntfy access token, sent as a bearer token. Needed on any server that does not allow anonymous publishing. |
+| `NTFY_REPEAT_MS` | `1800000` | How long the same alert is held back while its condition lasts (30 min). |
 | `COOKIE_LANG` | `EN` | Game language, seeded so a fresh profile never stops on the chooser. |
 | `CONTROL_PORT` | `3000` | Control page port. |
 | `BACKUP_EVERY_MS` | `1800000` | Save-export backup interval (30 min). |
@@ -148,7 +150,12 @@ half an hour rather than the run.
   page can crawl for a minute on its own. Checks never overlap, and every
   DevTools call has a deadline, so a browser that dies without closing its socket
   fails the check instead of parking it forever.
-- Anything that looks like real trouble pings ntfy, if it is configured.
+- Anything that looks like real trouble pings ntfy, if it is configured: a save
+  the browser refused to keep, a run that came back short, a backup refused for
+  losing ground, a stall the watchdog had to reload, and a ping back when each
+  clears. The same alert is held back for `NTFY_REPEAT_MS` while its cause
+  lasts. A quiet ping at startup proves the wiring, and a refused publish is
+  logged with its status rather than swallowed.
 
 ## Behind a reverse proxy
 

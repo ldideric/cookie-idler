@@ -9,6 +9,7 @@ services:
       TZ: ${TZ:-UTC}
       COOKIE_STEAM_VERSION: "${COOKIE_STEAM_VERSION:-}"
       COOKIE_NTFY_URL: "${COOKIE_NTFY_URL:-}"
+      COOKIE_NTFY_TOKEN: "${COOKIE_NTFY_TOKEN:-}"
     volumes:
       - ./mods:/mods-seed:ro
       - cookie_game:/game

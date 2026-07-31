@@ -29,6 +29,8 @@ const BACKUP_EVERY_MS = Number(process.env.BACKUP_EVERY_MS ?? 30 * 60 * 1000);
 const BACKUP_KEEP_DAYS = Number(process.env.BACKUP_KEEP_DAYS ?? 14);
 const WATCHDOG_EVERY_MS = Number(process.env.WATCHDOG_EVERY_MS ?? 60 * 1000);
 const NTFY_URL = process.env.COOKIE_NTFY_URL ?? '';   // e.g. http://ntfy/cookie
+const NTFY_TOKEN = process.env.COOKIE_NTFY_TOKEN ?? '';
+const NTFY_REPEAT_MS = Number(process.env.NTFY_REPEAT_MS ?? 30 * 60 * 1000);
 // Roomy next to the largest mods (CCSE is about a megabyte).
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES ?? 32 * 1024 * 1024);
 
@@ -270,9 +272,12 @@ async function persistSave() {
   if (!ok) {
     console.error(`[sidecar] the browser did not persist the save ` +
                   `(live: ${describe(live)}, stored: ${describe(stored)})`);
-    await notify('Cookie idler cannot save',
+    await notify('persist', 'Cookie idler cannot save',
       'The game wrote its save but the browser did not keep it. Progress since the ' +
       'last backup is only in memory; export a save now.', 'urgent');
+  } else {
+    await notifyResolved('persist', 'Cookie idler is saving again',
+      'The browser kept the last save.');
   }
   return ok;
 }
@@ -319,7 +324,8 @@ async function restoreIfLost() {
 
   // A different lineage is a different run, not a routine catch-up.
   if (newest.fp.lineage !== live.lineage || !took) {
-    await notify(took ? 'Cookie idler lost its save' : 'Cookie idler could not restore its save',
+    await notify('restore',
+      took ? 'Cookie idler lost its save' : 'Cookie idler could not restore its save',
       `The game came back as ${describe(live)}. ${took ? 'Restored' : 'Tried to restore'} ` +
       `${newest.name} (${describe(newest.fp)}).`, took ? 'high' : 'urgent');
   }
@@ -411,17 +417,48 @@ async function exportSave() {
   return { raw, patched, version: state.lastVersion };
 }
 
-async function notify(title, message, priority = 'default') {
-  if (!NTFY_URL) return;
+// An ntfy server that denies anonymous access answers 403 to a publish, so an
+// unchecked POST is indistinguishable from a delivered alert.
+async function postAlert(title, message, priority) {
+  if (!NTFY_URL) return false;
   try {
-    await fetch(NTFY_URL, {
+    const res = await fetch(NTFY_URL, {
       method: 'POST',
-      headers: { Title: title, Priority: priority, Tags: 'cookie' },
+      headers: {
+        Title: title,
+        Priority: priority,
+        Tags: 'cookie',
+        ...(NTFY_TOKEN ? { Authorization: `Bearer ${NTFY_TOKEN}` } : {}),
+      },
       body: message,
+      signal: AbortSignal.timeout(5000),
     });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      console.error(`[sidecar] ntfy refused the alert: ${res.status} ${detail.trim().slice(0, 200)}`);
+      return false;
+    }
+    return true;
   } catch (e) {
     console.error('[sidecar] ntfy failed:', e.message);
+    return false;
   }
+}
+
+const alerted = new Map();
+
+// Reserved before the publish, not after: two callers can be inside the await
+// at once, and each would pass a check made before either one lands.
+async function notify(key, title, message, priority = 'default') {
+  const last = alerted.get(key);
+  if (last != null && Date.now() - last < NTFY_REPEAT_MS) return;
+  alerted.set(key, Date.now());
+  if (!await postAlert(title, message, priority)) alerted.delete(key);
+}
+
+async function notifyResolved(key, title, message) {
+  if (!alerted.delete(key)) return;
+  await postAlert(title, message, 'default');
 }
 
 /**
@@ -443,7 +480,7 @@ async function backupSave(reason = 'periodic') {
       if (newest && newest.fp.baked > fp.baked) {
         console.error(`[sidecar] refusing to back up a save that lost ground ` +
                       `(live: ${describe(fp)}; newest backup ${newest.name}: ${describe(newest.fp)})`);
-        await notify('Cookie idler save went backwards',
+        await notify('backup', 'Cookie idler save went backwards',
           `Not writing a backup: the game is at ${describe(fp)} but ${newest.name} ` +
           `holds ${describe(newest.fp)}. The good save is kept.`, 'high');
         return null;
@@ -458,6 +495,10 @@ async function backupSave(reason = 'periodic') {
     await (await import('node:fs/promises')).rename(part, join(SAVES_DIR, name));
     await pruneBackups();
     console.log(`[sidecar] backup written (${reason}): ${name}`);
+    if (reason !== 'import') {
+      await notifyResolved('backup', 'Cookie idler is backing up again',
+        `The game is ahead of the newest backup again; ${name} written.`);
+    }
     return name;
   } catch (e) {
     console.error(`[sidecar] backup failed (${reason}):`, e.message);
@@ -524,8 +565,15 @@ async function watchdog() {
 
   const loopT = s?.loopT ?? null;
   if (loopT != null && loopT !== lastLoopT) {
+    // A reload clears the baseline, and a first sample differs from no sample
+    // whether the loop is running or frozen, so it is not evidence of recovery.
+    const advanced = lastLoopT !== -1;
     lastLoopT = loopT;
     strikes = 0;
+    if (advanced) {
+      await notifyResolved('stall', 'Cookie idler recovered',
+        `The game loop is advancing again (loopT=${loopT}).`);
+    }
     return;
   }
 
@@ -534,7 +582,7 @@ async function watchdog() {
                 `strike ${strikes}/${STALL_STRIKES}`);
   if (strikes < STALL_STRIKES) return;
 
-  await notify('Cookie idler stalled',
+  await notify('stall', 'Cookie idler stalled',
     `loopT stuck at ${loopT} for ${STALL_STRIKES} checks; reloading the game.`, 'high');
   try {
     await loadGame();
@@ -778,6 +826,9 @@ await bootGame();
 const control = createServer(handleControl);
 control.listen(CONTROL_PORT, '0.0.0.0', () =>
   console.log(`[sidecar] control on 0.0.0.0:${CONTROL_PORT}`));
+
+postAlert('Cookie idler started',
+  `Game version ${state.lastVersion}, ${enabledMods.length} mod(s) enabled.`, 'low');
 
 // First backup shortly after boot, so a save exists early.
 const backupTimer = setInterval(() => backupSave('periodic'), BACKUP_EVERY_MS);
