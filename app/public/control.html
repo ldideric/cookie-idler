@@ -198,6 +198,7 @@
     box-shadow: inset 0 2px 6px rgba(0,0,0,.5);
   }
   textarea:focus, .mod .order input:focus { outline: none; border-color: var(--gold-lo); }
+  .fields { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 18px; }
   .field { display: flex; flex-direction: column; gap: 6px; }
   .field span { font-size: 12px; color: var(--text-dim); }
   .field input {
@@ -265,7 +266,7 @@
   <section class="tab" id="tab-mods">
     <div class="panel">
       <h2>Mods</h2>
-      <p class="sub">Lower order loads first; put dependencies (like CCSE) above what needs them. Newly uploaded mods start switched off.</p>
+      <p class="sub">Lower order loads first. If one mod builds on another, give it the lower number so it is ready in time. Newly uploaded mods start switched off.</p>
       <div id="modrows"></div>
       <div class="actions">
         <button class="btn primary" id="saveMods">Save &amp; reload</button>
@@ -291,15 +292,17 @@
 
   <section class="tab" id="tab-save">
     <div class="panel">
-      <h2>Waiting for Steam</h2>
-      <p class="sub">Achievements the idler has earned that your Steam profile does not list yet, so you know when a collection run is worth doing. It reads the profile's public achievement page, which needs game details set to public.</p>
+      <h2>Achievements to collect</h2>
+      <p class="sub">Earned in the idler but not on your Steam profile yet, so you know when a run to Steam is worth doing. It reads the profile's public achievement page, which needs game details set to public.</p>
       <ul class="pending" id="pendList"></ul>
       <p class="sub" id="pendSummary">loading…</p>
-      <div class="actions">
+      <div class="fields">
         <label class="field wide"><span>Steam profile</span>
           <input id="steamProfile" placeholder="vanity name or 17-digit id" autocomplete="off"></label>
         <label class="field"><span>Alert from</span>
           <input id="pendThreshold" type="number" min="1" max="500"></label>
+      </div>
+      <div class="actions">
         <button class="btn primary" id="saveSettings">Save</button>
         <button class="btn" id="checkNow">Check now</button>
         <span class="msg" id="pendMsg"></span>
