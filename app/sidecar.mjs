@@ -15,6 +15,8 @@ import {
 import { startGameServer } from './gameserver.mjs';
 import { resolveMods, saveState, buildLoader, installMods, removeMod } from './modmanager.mjs';
 import { runMirror } from './mirror.mjs';
+import { fetchSteamAchievements, matchAchievements } from './steam.mjs';
+import { readSettings, saveSettings } from './settings.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GAME_DIR = process.env.GAME_DIR ?? '/game';
@@ -465,6 +467,145 @@ async function notifyResolved(key, title, message) {
   await postAlert(title, message, 'default');
 }
 
+const PENDING_CHECK_EVERY_MS = 30 * 60 * 1000;
+const FORCE_MIN_GAP_MS = 60 * 1000;
+
+const achievements = {
+  pending: [], alerted: [], steam: null, steamCheckedAt: 0,
+  status: 'no Steam profile set', matched: 0, excluded: 0, cachedFor: null,
+  unmatchedSteam: [], lastForcedAt: 0,
+};
+
+const achievementsFile = () => join(SAVES_DIR, 'achievements.json');
+
+const summarizeAchievements = () => ({
+  pending: achievements.pending,
+  count: achievements.pending.length,
+  status: achievements.status,
+  steamCheckedAt: achievements.steamCheckedAt,
+  matched: achievements.matched,
+  excluded: achievements.excluded,
+  unmatchedSteam: achievements.unmatchedSteam,
+});
+
+async function readAchievementState() {
+  try {
+    const p = JSON.parse(await readFile(achievementsFile(), 'utf8'));
+    achievements.alerted = Array.isArray(p.alerted) ? p.alerted : [];
+    achievements.steamCheckedAt = Number(p.steamCheckedAt) || 0;
+  } catch { /* first run */ }
+}
+
+async function writeAchievementState() {
+  const body = { alerted: achievements.alerted, steamCheckedAt: achievements.steamCheckedAt };
+  await writeFile(achievementsFile(), JSON.stringify(body, null, 2) + '\n')
+    .catch((e) => console.error('[sidecar] could not save achievement state:', e.message));
+}
+
+async function readOwnedAchievements() {
+  return evaluate(state.cdp, state.sessionId, `(function () {
+    var out = [];
+    for (var i in Game.AchievementsById) {
+      var a = Game.AchievementsById[i];
+      out.push({ id: a.id, name: a.name, dname: a.dname || a.name,
+                 won: a.won ? 1 : 0, pool: a.pool || 'normal' });
+    }
+    return out;
+  })()`);
+}
+
+/**
+ * Edge triggered on names rather than on the count. Steam works through an
+ * imported save as a backlog over the following hours, during which the set
+ * only shrinks, so alerting whenever it is non-empty would nag for that whole
+ * window. The announced set persists, so a restart re-announces nothing.
+ */
+async function announcePending(threshold) {
+  const names = achievements.pending.map((p) => p.name);
+  const previous = achievements.alerted;
+
+  if (!names.length) {
+    if (!previous.length) return;
+    achievements.alerted = [];
+    if (!await postAlert('Cookie idler is fully collected',
+      'Steam now has every achievement the idler has earned.', 'low')) {
+      achievements.alerted = previous;
+    }
+    return;
+  }
+
+  const fresh = names.filter((n) => !previous.includes(n));
+  if (!fresh.length || names.length < threshold) return;
+
+  const shown = fresh.slice(0, 10).join(', ');
+  const more = fresh.length > 10 ? `, and ${fresh.length - 10} more` : '';
+  // Marked announced only once it lands, or a refused publish would burn the
+  // alert and nothing would raise those names again.
+  achievements.alerted = names;
+  if (!await postAlert(`${names.length} achievement(s) to collect into Steam`,
+    `New: ${shown}${more}. Copy the save from the Save tab and import it in Steam.`,
+    'default')) {
+    achievements.alerted = previous;
+  }
+}
+
+async function refreshPending({ force = false } = {}) {
+  const settings = await readSettings(SAVES_DIR);
+  if (!settings.steamProfile) {
+    achievements.status = 'no Steam profile set';
+    achievements.pending = [];
+    return summarizeAchievements();
+  }
+
+  // The cache belongs to one profile, so pointing at another must not be
+  // answered from the old one.
+  if (achievements.cachedFor !== settings.steamProfile) {
+    achievements.steam = null;
+    achievements.cachedFor = settings.steamProfile;
+    achievements.steamCheckedAt = 0;
+  }
+
+  const stale = Date.now() - achievements.steamCheckedAt > settings.steamCheckEveryMs;
+  if (force || stale || !achievements.steam) {
+    const r = await fetchSteamAchievements(settings.steamProfile);
+    if (r.ok) {
+      achievements.steam = r.achievements;
+      achievements.steamCheckedAt = Date.now();
+      achievements.status = 'ok';
+    } else {
+      achievements.status = r.reason;
+      // A blip must not empty the pending set, so the last good list stands.
+      if (!achievements.steam) { achievements.pending = []; return summarizeAchievements(); }
+    }
+  }
+
+  let live;
+  try { live = await readOwnedAchievements(); } catch { return summarizeAchievements(); }
+  if (!Array.isArray(live) || !live.length) return summarizeAchievements();
+
+  const m = matchAchievements(live, achievements.steam);
+  achievements.pending = m.pending;
+  achievements.matched = m.matched;
+  achievements.excluded = m.excluded.length;
+  achievements.unmatchedSteam = m.unmatchedSteam;
+  if (m.steamCollisions.length) {
+    console.error(`[sidecar] ${m.steamCollisions.length} Steam name(s) collide after ` +
+                  `normalizing; the pending list may be wrong`);
+  }
+
+  await announcePending(settings.pendingThreshold);
+  await writeAchievementState();
+  return summarizeAchievements();
+}
+
+function forceRefresh() {
+  if (Date.now() - achievements.lastForcedAt < FORCE_MIN_GAP_MS) return false;
+  achievements.lastForcedAt = Date.now();
+  refreshPending({ force: true })
+    .catch((e) => console.error('[sidecar] achievement check failed:', e.message));
+  return true;
+}
+
 /**
  * A timestamped export, written .part then renamed so an external backup never
  * catches a half-written file. One that would lose ground is refused: a game
@@ -659,7 +800,7 @@ async function handleControl(req, res) {
       json(res, loopT == null ? 503 : 200, {
         ok: loopT != null, loopT, cookies, cps,
         version: state.lastVersion, steamVersion: STEAM_VERSION || null,
-        viewers: frameClients.size,
+        viewers: frameClients.size, pendingAchievements: achievements.pending.length,
       });
       return;
     }
@@ -739,6 +880,31 @@ async function handleControl(req, res) {
       return;
     }
 
+    if (path === '/api/settings' && req.method === 'GET') {
+      json(res, 200, await readSettings(SAVES_DIR));
+      return;
+    }
+
+    if (path === '/api/settings' && req.method === 'POST') {
+      const next = await saveSettings(SAVES_DIR, JSON.parse(await readBody(req)));
+      forceRefresh();
+      json(res, 200, next);
+      return;
+    }
+
+    if (path === '/api/achievements' && req.method === 'GET') {
+      json(res, 200, summarizeAchievements());
+      return;
+    }
+
+    if (path === '/api/achievements/check' && req.method === 'POST') {
+      const wait = FORCE_MIN_GAP_MS - (Date.now() - achievements.lastForcedAt);
+      if (wait > 0) { json(res, 429, { error: `wait ${Math.ceil(wait / 1000)}s` }); return; }
+      achievements.lastForcedAt = Date.now();
+      json(res, 200, await refreshPending({ force: true }));
+      return;
+    }
+
     if (path === '/api/reload' && req.method === 'POST') {
       await loadGame();
       json(res, 200, { ok: true, version: state.lastVersion });
@@ -766,6 +932,7 @@ async function handleControl(req, res) {
     }
 
     if (path === '/save') {
+      forceRefresh();
       const { raw, patched, version } = await exportSave();
       const wantPatched = url.searchParams.get('patched') === '1';
       // Falling back to raw here would serve the one file certain to be refused.
@@ -857,6 +1024,18 @@ const watchdogTimer = setInterval(() => {
     .finally(() => { watchdogBusy = false; });
 }, WATCHDOG_EVERY_MS);
 setTimeout(() => backupSave('startup'), 15_000);
+let pendingBusy = false;
+const pendingTimer = setInterval(() => {
+  if (pendingBusy) return;
+  pendingBusy = true;
+  refreshPending()
+    .catch((e) => console.error('[sidecar] achievement check failed:', e.message))
+    .finally(() => { pendingBusy = false; });
+}, PENDING_CHECK_EVERY_MS);
+
+await readAchievementState();
+setTimeout(() => forceRefresh(), 30_000);
+
 
 let shuttingDown = false;
 async function shutdown(sig) {
@@ -865,6 +1044,7 @@ async function shutdown(sig) {
   console.log(`[sidecar] ${sig}, shutting down`);
   clearInterval(backupTimer);
   clearInterval(watchdogTimer);
+  clearInterval(pendingTimer);
   // The backup is the authoritative final state, so continuity does not depend
   // on the localStorage flush. Chromium still gets a graceful close, under a
   // timeout.

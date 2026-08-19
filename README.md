@@ -3,7 +3,7 @@
 Runs [Cookie Clicker](https://orteil.dashnet.org/cookieclicker/) 24/7 in a small
 headless container, with your own mods, a live control page you can watch and
 click from anywhere, and one-click save export so progress can move to the Steam
-copy (Steam achievements pop on import).
+copy, achievements included.
 
 It idles the **web** build. The Steam build has no native Linux binary, so
 running it would mean Xvfb plus Proton plus Steam, and Steam's
@@ -67,8 +67,9 @@ volumes:
 - **Mods** lists every mod with an enable toggle, load order, and its last load
   error. Reload applies changes. Below the list you can add a mod by dragging its
   folder in, or remove one.
-- **Save** downloads the live save for importing into Steam, and imports a save
-  to seed the idler with existing progress.
+- **Save** copies the live save out for importing into Steam, imports one to seed
+  the idler with existing progress, and tracks which achievements Steam is still
+  missing.
 
 ## Moving progress to and from Steam
 
@@ -76,9 +77,22 @@ volumes:
 into the control page's Save tab, Import.
 
 **Collect into Steam:** Save tab, Copy save code; in Steam, Options, then Import
-save, and paste. Achievements pop on import, though Steam may take a while to
-work through a backlog. This step is manual so the idler and your Steam sessions
-never collide.
+save, and paste. Nothing pops while you import. Loading a save sets each
+achievement flag directly instead of going through the unlock path that notifies
+Steam, so Steam works through them as a backlog over the following hours. This
+step is manual so the idler and your Steam sessions never collide.
+
+**Knowing when to collect:** the Save tab can list the achievements the idler has
+earned that your Steam profile does not have yet, and push an ntfy alert once
+that many are waiting. Enter your Steam profile there (vanity name or 17-digit
+id) and set the threshold. It reads the profile's public achievement page, so
+game details have to be public, and it falls silent rather than guessing if the
+page cannot be read. Settings live in `settings.json` next to the saves.
+
+Nothing pops the moment you import, so the count is the signal: collect, then
+watch it fall to zero as Steam works through the backlog. After a game update,
+`node checknames.mjs` re-proves that the game's achievement names still line up
+with Steam's.
 
 Steam builds trail the web version, and the game refuses to import a save from a
 version newer than its own. Set `COOKIE_STEAM_VERSION` to the version Steam
