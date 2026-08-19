@@ -281,8 +281,13 @@
   <section class="tab" id="tab-save">
     <div class="panel">
       <h2>Export to Steam</h2>
-      <p class="sub">Grabs the live save right now. In Steam: Options, then Import save, and paste the file's contents. Achievements pop on import.</p>
-      <a class="btn primary" href="/save" download>Download save</a>
+      <p class="sub">Grabs the live save right now. In Steam: Options, then Import save, and paste. Achievements pop on import.</p>
+      <p class="sub" id="steamNote" hidden></p>
+      <div class="actions">
+        <button class="btn primary" id="copySave">Copy save code</button>
+        <a class="btn" id="dlSave" href="/save" download>Download</a>
+        <span class="msg" id="exportMsg"></span>
+      </div>
     </div>
     <div class="panel">
       <h2>Import a save</h2>
@@ -330,6 +335,7 @@ function fmt(n) {
   if (base >= SCALE.length) return 'Infinity';
   return (Math.round(n * 1000) / 1000).toLocaleString() + ' ' + SCALE[base];
 }
+let patchNeeded = false;
 async function poll() {
   try {
     const d = await (await fetch('/up')).json();
@@ -337,6 +343,12 @@ async function poll() {
     $('#s-cps').textContent = fmt(d.cps);
     $('#s-ver').textContent = d.version ?? '-';
     $('#livedot').classList.toggle('live', !!d.ok);
+    patchNeeded = !!d.steamVersion && String(d.version) !== d.steamVersion;
+    $('#steamNote').hidden = !patchNeeded;
+    $('#dlSave').href = patchNeeded ? '/save?patched=1' : '/save';
+    if (patchNeeded) $('#steamNote').textContent =
+      `This build is ${d.version} and Steam is on ${d.steamVersion}, which Steam `
+      + `refuses to import. You get a copy relabelled ${d.steamVersion}.`;
   } catch { $('#livedot').classList.remove('live'); }
 }
 setInterval(poll, 2500); poll();
@@ -534,6 +546,39 @@ $('#doImport').onclick = async () => {
     msg.textContent = d.ok ? 'imported and saved ✓' : 'the game rejected that code';
     if (d.ok) { $('#importCode').value = ''; poll(); }
   } catch { msg.textContent = 'import failed'; }
+};
+
+// navigator.clipboard is undefined outside a secure context, and a plain http
+// LAN address is not one, so the textarea path is the usual one here.
+async function toClipboard(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  ta.remove();
+  return ok;
+}
+
+$('#copySave').onclick = async () => {
+  const msg = $('#exportMsg');
+  msg.textContent = 'fetching…';
+  try {
+    const res = await fetch(patchNeeded ? '/save?patched=1' : '/save');
+    const body = (await res.text()).trim();
+    if (!res.ok) {
+      let why = res.status;
+      try { why = JSON.parse(body).error ?? why; } catch {}
+      msg.textContent = 'export failed: ' + why;
+      return;
+    }
+    msg.textContent = await toClipboard(body)
+      ? 'copied ✓ paste it into Steam'
+      : 'could not reach the clipboard, use Download';
+  } catch { msg.textContent = 'export failed'; }
 };
 
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

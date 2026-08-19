@@ -75,13 +75,15 @@ volumes:
 **Seed the idler:** in Steam, Options, then Export save; copy the code; paste it
 into the control page's Save tab, Import.
 
-**Collect into Steam:** Save tab, Download save; in Steam, Options, then Import
-save, and paste the file's contents. Achievements pop on import, though Steam may
-take a while to work through a backlog. This step is manual so the idler and your
-Steam sessions never collide.
+**Collect into Steam:** Save tab, Copy save code; in Steam, Options, then Import
+save, and paste. Achievements pop on import, though Steam may take a while to
+work through a backlog. This step is manual so the idler and your Steam sessions
+never collide.
 
-If your Steam build runs a different version than the web mirror, set
-`COOKIE_STEAM_VERSION` and the export also offers a version-patched variant.
+Steam builds trail the web version, and the game refuses to import a save from a
+version newer than its own. Set `COOKIE_STEAM_VERSION` to the version Steam
+reports and the export relabels the save to match. Upgrades and achievements
+added since that version are dropped on load, so relabel down, never up.
 
 ## Mods
 

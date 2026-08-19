@@ -402,16 +402,20 @@ async function dispatchKey(key) {
 
 /**
  * Game.WriteSave(1) exports without touching disk (main.js:2871). The patched
- * variant is a community workaround for a version mismatch with Steam.
+ * variant rewrites the version field: Game.LoadSave refuses a save from a
+ * future version (main.js:3175) unless Steam's own auto-load path waives it.
+ * Re-encoded because the loader always base64-decodes (main.js:3155).
  */
 async function exportSave() {
   const raw = await evaluate(state.cdp, state.sessionId, 'Game.WriteSave(1)');
   let patched = null;
   if (STEAM_VERSION && state.lastVersion && String(state.lastVersion) !== STEAM_VERSION) {
     try {
-      const decoded = Buffer.from(decodeURIComponent(raw.split('!END!')[0]), 'base64');
-      const text = decoded.toString('binary');
-      patched = text.replace(/^[0-9.]+\|/, `${STEAM_VERSION}|`);
+      const text = Buffer.from(unescape(raw).split('!END!')[0], 'base64').toString('latin1');
+      const bumped = text.replace(/^[0-9.]+\|/, `${STEAM_VERSION}|`);
+      if (bumped !== text) {
+        patched = escape(Buffer.from(bumped, 'latin1').toString('base64') + '!END!');
+      }
     } catch { /* leave patched null */ }
   }
   return { raw, patched, version: state.lastVersion };
@@ -654,7 +658,8 @@ async function handleControl(req, res) {
       } catch { /* browser down */ }
       json(res, loopT == null ? 503 : 200, {
         ok: loopT != null, loopT, cookies, cps,
-        version: state.lastVersion, viewers: frameClients.size,
+        version: state.lastVersion, steamVersion: STEAM_VERSION || null,
+        viewers: frameClients.size,
       });
       return;
     }
@@ -762,12 +767,22 @@ async function handleControl(req, res) {
 
     if (path === '/save') {
       const { raw, patched, version } = await exportSave();
-      const wantPatched = url.searchParams.get('patched') === '1' && patched;
+      const wantPatched = url.searchParams.get('patched') === '1';
+      // Falling back to raw here would serve the one file certain to be refused.
+      if (wantPatched && !patched) {
+        json(res, 409, {
+          error: STEAM_VERSION
+            ? `nothing to patch, the game already reports ${version}`
+            : 'set COOKIE_STEAM_VERSION to the version your Steam build runs',
+        });
+        return;
+      }
       const body = wantPatched ? patched : raw;
+      const label = wantPatched ? STEAM_VERSION : version;
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       res.writeHead(200, {
         'Content-Type': 'text/plain; charset=utf-8',
-        'Content-Disposition': `attachment; filename="cookieclicker-${version}-${stamp}.txt"`,
+        'Content-Disposition': `attachment; filename="cookieclicker-${label}-${stamp}.txt"`,
       });
       res.end(body);
       return;
