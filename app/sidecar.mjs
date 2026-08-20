@@ -5,6 +5,7 @@
 // runs at full speed regardless, so an unwatched idler pays for logic only.
 
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { readFile, writeFile, readdir, unlink, mkdir, access, cp } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,21 @@ import { resolveMods, saveState, buildLoader, installMods, removeMod } from './m
 import { runMirror } from './mirror.mjs';
 import { fetchSteamAchievements, matchAchievements } from './steam.mjs';
 import { readSettings, saveSettings } from './settings.mjs';
+
+function envOrFile(name, fallback = '') {
+  const path = process.env[`${name}_FILE`];
+
+  if (!path) return process.env[name] ?? fallback;
+
+  try {
+    // A secret file usually ends in a newline, and a bearer token carrying
+    // one is rejected as malformed.
+    return readFileSync(path, 'utf8').trim();
+  } catch (e) {
+    console.error(`[sidecar] ${name}_FILE is set but unreadable (${path}): ${e.message}`);
+    return fallback;
+  }
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GAME_DIR = process.env.GAME_DIR ?? '/game';
@@ -31,7 +47,7 @@ const BACKUP_EVERY_MS = Number(process.env.BACKUP_EVERY_MS ?? 30 * 60 * 1000);
 const BACKUP_KEEP_DAYS = Number(process.env.BACKUP_KEEP_DAYS ?? 14);
 const WATCHDOG_EVERY_MS = Number(process.env.WATCHDOG_EVERY_MS ?? 60 * 1000);
 const NTFY_URL = process.env.COOKIE_NTFY_URL ?? '';   // e.g. http://ntfy/cookie
-const NTFY_TOKEN = process.env.COOKIE_NTFY_TOKEN ?? '';
+const NTFY_TOKEN = envOrFile('COOKIE_NTFY_TOKEN');
 const NTFY_REPEAT_MS = Number(process.env.NTFY_REPEAT_MS ?? 30 * 60 * 1000);
 // Roomy next to the largest mods (CCSE is about a megabyte).
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES ?? 32 * 1024 * 1024);

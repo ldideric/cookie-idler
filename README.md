@@ -126,6 +126,7 @@ All optional.
 | `COOKIE_STEAM_VERSION` | (unset) | Your Steam build's version, if it differs from the web mirror. Enables a version-patched export. |
 | `COOKIE_NTFY_URL` | (unset) | [ntfy](https://ntfy.sh) topic URL for alerts, for example `https://ntfy.sh/my-cookie-idler`. Unset means no alerts. |
 | `COOKIE_NTFY_TOKEN` | (unset) | ntfy access token, sent as a bearer token. Needed on any server that does not allow anonymous publishing. |
+| `COOKIE_NTFY_TOKEN_FILE` | (unset) | Path to a file holding that token, for Docker/Kubernetes secrets. Wins over `COOKIE_NTFY_TOKEN`, and the trailing newline is trimmed. |
 | `NTFY_REPEAT_MS` | `1800000` | How long the same alert is held back while its condition lasts (30 min). |
 | `COOKIE_LANG` | `EN` | Game language, seeded so a fresh profile never stops on the chooser. |
 | `CONTROL_PORT` | `3000` | Control page port. |
