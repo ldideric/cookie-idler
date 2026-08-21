@@ -11,8 +11,12 @@ export function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
   const dirs = readdirSync(MS_PLAYWRIGHT).filter((d) => d.startsWith('chromium-'));
   for (const d of dirs) {
-    const p = `${MS_PLAYWRIGHT}/${d}/chrome-linux64/chrome`;
-    if (existsSync(p)) return p;
+    // x64 unpacks Chrome for Testing into chrome-linux64; arm64 is Playwright's
+    // own build, in chrome-linux.
+    for (const layout of ['chrome-linux64', 'chrome-linux']) {
+      const p = `${MS_PLAYWRIGHT}/${d}/${layout}/chrome`;
+      if (existsSync(p)) return p;
+    }
   }
   throw new Error(`no chromium found under ${MS_PLAYWRIGHT}`);
 }
