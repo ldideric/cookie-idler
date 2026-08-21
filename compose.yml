@@ -1,7 +1,7 @@
 services:
   cookie:
     build: .
-    # image: ghcr.io/ldideric/cookie-idler:latest
+    # image: ghcr.io/ldideric/cookie-idler:1.0
     init: true                    # reaps the Chromium child
     ports:
       - "3000:3000"

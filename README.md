@@ -35,7 +35,7 @@ Or reference the published image in your own stack instead of building:
 ```yaml
 services:
   cookie:
-    image: ghcr.io/ldideric/cookie-idler:latest
+    image: ghcr.io/ldideric/cookie-idler:1.0
     init: true
     ports:
       - "3000:3000"
@@ -140,6 +140,29 @@ All optional.
 Volumes: `/game` (mirror), `/mods` (live mod set), `/profile` (Chromium profile,
 which is the game's autosave), `/saves` (timestamped exports). Mount your mods
 read-only at `/mods-seed`.
+
+## Versioning
+
+Images are published for `linux/amd64` and `linux/arm64`.
+
+| Tag | Moves | Use it for |
+|---|---|---|
+| `1.2.3` | never | Pinning an exact build. |
+| `1.2` | on patch releases | The usual choice: bugfixes, no surprises. |
+| `latest` | on every release | Following releases without pinning. |
+| `edge` | on every push to `main` | Trying unreleased work. |
+| `a1b2c3d` | never | A specific commit, for bisecting or rollback. |
+
+The version number is a promise about the container's interface, which is the
+environment variables above, the volume paths, the control page port, and the
+readability of an existing `/profile` and `/saves`. Removing or renaming any of
+those, or requiring a manual migration, means a new major version. New settings
+with back-compatible defaults mean a new minor.
+
+Three things it deliberately does not cover. Cookie Clicker itself is mirrored
+at runtime and changes whenever the game does. Mods are third-party and keep
+their own versions. The control page is a UI rather than an API, so its markup
+and endpoints can change in any release.
 
 ## Durability
 
