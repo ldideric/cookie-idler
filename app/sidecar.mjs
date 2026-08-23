@@ -18,6 +18,9 @@ import { resolveMods, saveState, buildLoader, installMods, removeMod } from './m
 import { runMirror } from './mirror.mjs';
 import { fetchSteamAchievements, matchAchievements } from './steam.mjs';
 import { readSettings, saveSettings } from './settings.mjs';
+import {
+  decodeSave, encodeSave, fingerprint, readModMeta, modMetaIds, withModMeta,
+} from './savefile.mjs';
 
 function envOrFile(name, fallback = '') {
   const path = process.env[`${name}_FILE`];
@@ -195,41 +198,6 @@ async function initLateMods() {
   await waitFor(state.cdp, state.sessionId, 'window.__cookieModsDone === true', { timeoutMs: 30_000 })
     .catch(() => console.error('[sidecar] mods did not finish loading in time'));
   await evaluate(state.cdp, state.sessionId, 'Game.launchMods(); true;').catch(() => {});
-}
-
-/**
- * Which run a save belongs to and how far it got. Null if it does not decode.
- *
- * WriteSave(1) returns escape(utf8_to_b64(raw)+'!END!') (main.js:3048). Decoded
- * as latin1, since every field read here is ASCII digits.
- *
- *   lineage  legacy start date (main.js:2881), changing only on replace or wipe.
- *   baked    earned this run plus carried from past runs, so within one lineage
- *            it only ever grows.
- */
-function fingerprint(saveString) {
-  try {
-    const b64 = unescape(String(saveString)).split('!END!')[0];
-    if (!b64) return null;
-    const raw = Buffer.from(b64, 'base64').toString('latin1');
-    const parts = raw.split('|');
-    if (parts.length < 5) return null;
-    const details = parts[2].split(';');
-    const misc = parts[4].split(';');
-    const lineage = parseInt(details[1]);
-    const earned = parseFloat(misc[1]);
-    const fromPastRuns = parseFloat(misc[8]);
-    const lastDate = parseInt(details[2]);
-    if (!Number.isFinite(lineage) || !Number.isFinite(earned)) return null;
-    return {
-      lineage,
-      baked: earned + (Number.isFinite(fromPastRuns) ? fromPastRuns : 0),
-      lastDate: Number.isFinite(lastDate) ? lastDate : 0,
-      ascensions: parseInt(misc[14]) || 0,
-    };
-  } catch {
-    return null;
-  }
 }
 
 const describe = (fp) => fp
@@ -419,24 +387,55 @@ async function dispatchKey(key) {
 }
 
 /**
- * Game.WriteSave(1) exports without touching disk (main.js:2871). The patched
- * variant rewrites the version field: Game.LoadSave refuses a save from a
- * future version (main.js:3175) unless Steam's own auto-load path waives it.
- * Re-encoded because the loader always base64-decodes (main.js:3155).
+ * Steam's list of enabled mods, taken from the last save Steam exported and put
+ * back on the way out: only Steam writes that list, and only into the save, so
+ * without it every import tells Steam no mod is enabled.
+ */
+const modMetaFile = () => join(SAVES_DIR, 'steam-mods.txt');
+let steamModMeta = null;
+
+async function readModMetaState() {
+  try { steamModMeta = (await readFile(modMetaFile(), 'utf8')).trim() || null; }
+  catch { /* no save from Steam has been seen yet */ }
+}
+
+/** Absent is normal: only a save exported from Steam carries the pair. */
+async function rememberModMeta(meta) {
+  if (!meta || meta === steamModMeta) return !!meta;
+  await mkdir(SAVES_DIR, { recursive: true });
+  await writeFile(modMetaFile(), meta + '\n');
+  steamModMeta = meta;
+  console.log(`[sidecar] remembered Steam's mod list: ${modMetaIds(meta).join(', ')}`);
+  return true;
+}
+
+/**
+ * Game.WriteSave(1) exports without touching disk (main.js:2871). The Steam
+ * copy takes two edits the web build cannot make itself: the version field,
+ * because Game.LoadSave refuses a save from a future version (main.js:3175)
+ * unless Steam's own auto-load path waives it, and the mod list. Re-encoded
+ * because the loader always base64-decodes (main.js:3155).
  */
 async function exportSave() {
   const raw = await evaluate(state.cdp, state.sessionId, 'Game.WriteSave(1)');
-  let patched = null;
-  if (STEAM_VERSION && state.lastVersion && String(state.lastVersion) !== STEAM_VERSION) {
-    try {
-      const text = Buffer.from(unescape(raw).split('!END!')[0], 'base64').toString('latin1');
-      const bumped = text.replace(/^[0-9.]+\|/, `${STEAM_VERSION}|`);
-      if (bumped !== text) {
-        patched = escape(Buffer.from(bumped, 'latin1').toString('base64') + '!END!');
-      }
-    } catch { /* leave patched null */ }
+  let text = decodeSave(raw);
+  const changed = [];
+
+  if (text && STEAM_VERSION && state.lastVersion && String(state.lastVersion) !== STEAM_VERSION) {
+    const bumped = text.replace(/^[0-9.]+\|/, `${STEAM_VERSION}|`);
+    if (bumped !== text) { text = bumped; changed.push('version'); }
   }
-  return { raw, patched, version: state.lastVersion };
+  if (text && steamModMeta) {
+    const withMods = withModMeta(text, steamModMeta);
+    if (withMods) { text = withMods; changed.push('mods'); }
+  }
+
+  return {
+    raw,
+    patched: changed.length ? encodeSave(text) : null,
+    changed,
+    version: state.lastVersion,
+  };
 }
 
 // An ntfy server that denies anonymous access answers 403 to a publish, so an
@@ -816,6 +815,7 @@ async function handleControl(req, res) {
       json(res, loopT == null ? 503 : 200, {
         ok: loopT != null, loopT, cookies, cps,
         version: state.lastVersion, steamVersion: STEAM_VERSION || null,
+        steamMods: steamModMeta ? modMetaIds(steamModMeta) : [],
         viewers: frameClients.size, pendingAchievements: achievements.pending.length,
       });
       return;
@@ -933,6 +933,10 @@ async function handleControl(req, res) {
       const wanted = fingerprint(code);
       if (!wanted) { json(res, 422, { error: 'that does not decode as a save' }); return; }
 
+      // Read off the pasted code, not off the game: Game.LoadSave drops the pair
+      // on the way in (main.js:3443), so this is the only chance to see it.
+      const gotMods = await rememberModMeta(readModMeta(code));
+
       await evaluate(state.cdp, state.sessionId, `Game.ImportSaveCode(${JSON.stringify(code)})`);
       // Importing replays Game.LoadSave, restoring the save's own prefs.
       await pinIdlePrefs();
@@ -943,25 +947,38 @@ async function handleControl(req, res) {
       const ok = !!live && live.lineage === wanted.lineage && live.baked >= wanted.baked;
       const persisted = ok ? await persistSave() : false;
       if (ok) await backupSave('import');
-      json(res, ok ? 200 : 422, { ok, persisted });
+      json(res, ok ? 200 : 422, { ok, persisted, mods: gotMods });
+      return;
+    }
+
+    // The idler is usually ahead of Steam, so recording the mod list must not
+    // cost a run: this takes the pasted code apart without loading it.
+    if (path === '/save/mods' && req.method === 'POST') {
+      const meta = readModMeta((await readBody(req)).trim());
+      if (!meta) {
+        json(res, 422, { error: 'no mod list in that code; export it from Steam with your mods on' });
+        return;
+      }
+      await rememberModMeta(meta);
+      json(res, 200, { ok: true, mods: modMetaIds(meta) });
       return;
     }
 
     if (path === '/save') {
       forceRefresh();
-      const { raw, patched, version } = await exportSave();
+      const { raw, patched, changed, version } = await exportSave();
       const wantPatched = url.searchParams.get('patched') === '1';
       // Falling back to raw here would serve the one file certain to be refused.
       if (wantPatched && !patched) {
         json(res, 409, {
-          error: STEAM_VERSION
-            ? `nothing to patch, the game already reports ${version}`
-            : 'set COOKIE_STEAM_VERSION to the version your Steam build runs',
+          error: 'nothing to prepare: '
+            + (STEAM_VERSION ? `the game already reports ${version}` : 'COOKIE_STEAM_VERSION is unset')
+            + ' and no Steam mod list has been imported',
         });
         return;
       }
       const body = wantPatched ? patched : raw;
-      const label = wantPatched ? STEAM_VERSION : version;
+      const label = wantPatched && changed.includes('version') ? STEAM_VERSION : version;
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       res.writeHead(200, {
         'Content-Type': 'text/plain; charset=utf-8',
@@ -1050,6 +1067,7 @@ const pendingTimer = setInterval(() => {
 }, PENDING_CHECK_EVERY_MS);
 
 await readAchievementState();
+await readModMetaState();
 setTimeout(() => forceRefresh(), 30_000);
 
 

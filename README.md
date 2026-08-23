@@ -99,6 +99,21 @@ version newer than its own. Set `COOKIE_STEAM_VERSION` to the version Steam
 reports and the export relabels the save to match. Upgrades and achievements
 added since that version are dropped on load, so relabel down, never up.
 
+**Your Steam mods survive the trip.** Which mods Steam has enabled is recorded
+in the save file itself, and only the Steam build writes it. The web build
+ignores that entry on load and cannot write it back, so a save that has passed
+through the idler tells Steam no mod is enabled and Steam switches them all off,
+one import at a time.
+
+Show the idler that entry once and every export puts it back unchanged. Paste a
+save exported from Steam into the Save tab and press **Record mods only**, which
+reads the list and leaves the run alone; seeding the idler with a full import
+records it too. The list is kept in `steam-mods.txt` next to the saves, and the
+Save tab names the mods an export will carry. Change which mods Steam runs and
+the idler is a version behind until you record it again. After a game update,
+`node checksave.mjs <save exported from Steam>` re-proves that the rewrite still
+gives back Steam's own bytes.
+
 ## Mods
 
 One folder per mod, Steam Workshop layout (`info.txt` plus `main.js`), so a

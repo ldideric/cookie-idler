@@ -321,9 +321,11 @@
     <div class="panel">
       <h2>Import a save</h2>
       <p class="sub">Seed the idler with existing progress: in Steam, Options, then Export save, and paste the code here. This replaces the idler's current state.</p>
+      <p class="sub">It also records which mods Steam has enabled, which only Steam writes and only into the save. Exports cannot put that list back until the idler has seen it once, and without it importing into Steam switches your mods off. <b>Record mods only</b> takes just the list, leaving the idler's run alone.</p>
       <textarea id="importCode" placeholder="paste save code…"></textarea>
       <div class="actions">
         <button class="btn primary" id="doImport">Load into idler</button>
+        <button class="btn" id="doImportMods">Record mods only</button>
         <span class="msg" id="importMsg"></span>
       </div>
     </div>
@@ -365,7 +367,7 @@ function fmt(n) {
   if (base >= SCALE.length) return 'Infinity';
   return (Math.round(n * 1000) / 1000).toLocaleString() + ' ' + SCALE[base];
 }
-let patchNeeded = false;
+let preparedCopy = false;
 async function poll() {
   try {
     const d = await (await fetch('/up')).json();
@@ -376,12 +378,22 @@ async function poll() {
     const pend = d.pendingAchievements ?? 0;
     $('#s-pend-wrap').hidden = !pend;
     $('#s-pend').textContent = pend;
-    patchNeeded = !!d.steamVersion && String(d.version) !== d.steamVersion;
-    $('#steamNote').hidden = !patchNeeded;
-    $('#dlSave').href = patchNeeded ? '/save?patched=1' : '/save';
-    if (patchNeeded) $('#steamNote').textContent =
-      `This build is ${d.version} and Steam is on ${d.steamVersion}, which Steam `
-      + `refuses to import. You get a copy relabelled ${d.steamVersion}.`;
+    const verNote = !!d.steamVersion && String(d.version) !== d.steamVersion
+      ? `This build is ${d.version} and Steam is on ${d.steamVersion}, which Steam `
+        + `refuses to import. You get a copy relabelled ${d.steamVersion}.`
+      : '';
+    const mods = d.steamMods ?? [];
+    const modNote = mods.length
+      ? `Steam's mod list rides along, so importing leaves ${mods.join(', ')} enabled.`
+      : 'Steam has not shown the idler which mods it has enabled yet, so importing this '
+        + 'will switch them off. Paste a save from Steam below and record the list.';
+    const note = [verNote, modNote].filter(Boolean).join(' ');
+    // The note also warns when there is nothing to put back, and asking for a
+    // prepared copy then is a 409.
+    preparedCopy = !!verNote || mods.length > 0;
+    $('#steamNote').hidden = !note;
+    $('#steamNote').textContent = note;
+    $('#dlSave').href = preparedCopy ? '/save?patched=1' : '/save';
   } catch { $('#livedot').classList.remove('live'); }
 }
 setInterval(poll, 2500); poll();
@@ -570,13 +582,26 @@ drop.addEventListener('drop', async (ev) => {
   await sendMods(out, '');
 });
 
+$('#doImportMods').onclick = async () => {
+  const code = $('#importCode').value.trim(), msg = $('#importMsg');
+  if (!code) { msg.textContent = 'paste a save code first'; return; }
+  msg.textContent = 'reading…';
+  try {
+    const d = await (await fetch('/save/mods', { method:'POST', body: code })).json();
+    msg.textContent = d.ok ? 'recorded ✓ ' + d.mods.join(', ') : d.error;
+    if (d.ok) { $('#importCode').value = ''; poll(); }
+  } catch { msg.textContent = 'could not read that code'; }
+};
+
 $('#doImport').onclick = async () => {
   const code = $('#importCode').value.trim(), msg = $('#importMsg');
   if (!code) { msg.textContent = 'paste a save code first'; return; }
   msg.textContent = 'importing…';
   try {
     const d = await (await fetch('/save/import', { method:'POST', body: code })).json();
-    msg.textContent = d.ok ? 'imported and saved ✓' : 'the game rejected that code';
+    msg.textContent = d.ok
+      ? (d.mods ? 'imported and saved ✓ mod list recorded' : 'imported and saved ✓')
+      : 'the game rejected that code';
     if (d.ok) { $('#importCode').value = ''; poll(); }
   } catch { msg.textContent = 'import failed'; }
 };
@@ -647,7 +672,7 @@ $('#copySave').onclick = async () => {
   const msg = $('#exportMsg');
   msg.textContent = 'fetching…';
   try {
-    const res = await fetch(patchNeeded ? '/save?patched=1' : '/save');
+    const res = await fetch(preparedCopy ? '/save?patched=1' : '/save');
     const body = (await res.text()).trim();
     if (!res.ok) {
       let why = res.status;
