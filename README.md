@@ -79,8 +79,10 @@ into the control page's Save tab, Import.
 **Collect into Steam:** Save tab, Copy save code; in Steam, Options, then Import
 save, and paste. Nothing pops while you import. Loading a save sets each
 achievement flag directly instead of going through the unlock path that notifies
-Steam, so Steam works through them as a backlog over the following hours. This
-step is manual so the idler and your Steam sessions never collide.
+Steam, so the handoff happens at load time: `LoadSave` finishes by telling Steam
+what your profile is missing. That queue drains once and never retries, so a
+long backlog is what makes a collect feel slow, not Steam itself. This step is
+manual so the idler and your Steam sessions never collide.
 
 **Knowing when to collect:** the Save tab can list the achievements the idler has
 earned that your Steam profile does not have yet, and push an ntfy alert once
@@ -90,7 +92,10 @@ game details have to be public, and it falls silent rather than guessing if the
 page cannot be read. Settings live in `settings.json` next to the saves.
 
 Nothing pops the moment you import, so the count is the signal: collect, then
-watch it fall to zero as Steam works through the backlog. After a game update,
+watch it fall to zero as Steam works through the queue. If anything is still
+listed half an hour later, import the same save again instead of waiting longer.
+The second load re-queues only what is left, and a queue of one or two pops
+almost at once. After a game update,
 `node checknames.mjs` re-proves that the game's achievement names still line up
 with Steam's.
 
