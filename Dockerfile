@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.61.1-noble
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 # The base image's default user has no writable home, and Chromium needs one.
 ENV HOME=/tmp \
