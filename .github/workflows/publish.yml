@@ -10,7 +10,7 @@ name: "Publish to GHCR"
 
 jobs:
   build_and_push:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     permissions:
       contents: read
@@ -75,7 +75,7 @@ jobs:
       fail-fast: false
       matrix:
         runner:
-          - ubuntu-latest
+          - ubuntu-24.04
           - ubuntu-24.04-arm
 
     steps:
